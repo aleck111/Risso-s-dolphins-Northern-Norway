@@ -76,6 +76,8 @@ bath <- merge(bath_col)
 #| warning: false
 #| echo: false
 
+# AIS data for boat tracks of whale watching vessels was downloaded as .geojson from https://kystdatahuset.no/tallogstatistikk/seilas-for-skip/filter with selection of relevant MMSI numbers and time periods.
+
 w2s1 <- read_sf(here("data/AIS_tracks/w2s1.geojson"))
 w2s2 <- read_sf(here("data/AIS_tracks/w2s2.geojson")) 
 w2s3 <- read_sf(here("data/AIS_tracks/w2s3.geojson")) 
