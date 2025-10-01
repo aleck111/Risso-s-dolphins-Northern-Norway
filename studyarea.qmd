@@ -1,0 +1,275 @@
+---
+title: "Study area"
+author: "Alexander Eckerle"
+date: today
+format: html
+editor: source
+---
+
+# Setup
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| echo: false
+
+library(tidyverse)
+library(here)
+library(conflicted)
+library(janitor)
+library(raster)
+library(terra)
+library(tidyterra)
+library(rnaturalearth)
+library(ggspatial)
+library(sf)
+library(ggnewscale)
+library(formattable)
+library(lubridate)
+library(patchwork)
+
+conflict_prefer_all("dplyr", quiet = TRUE)
+
+#bc_extent <- ext(14.5, 17, 69, 69.8) #larger area to calculate numbers
+bc_extent <- ext(14.8, 17, 69, 69.75) #smaller area for better display of the maps
+```
+
+# Loading data
+## TIFF map 
+```{r}
+#| label: load-tiffs
+#| message: false
+#| warning: false
+#| echo: false
+
+# Tiff files from https://kartkatalog.geonorge.no/metadata/kartverket/sjo-terrengmodeller-dtm-50/67a3a191-49cc-45bc-baf0-eaaf7c513549 and https://kartkatalog.geonorge.no/metadata/e25d0104-0858-4d06-bba8-d154514c11d2
+
+bath1 <- rast(here("data/bc_50m/NHS-D2830_50M_E25833.tif"))
+bath2 <- rast(here("data/bc_50m/NHS-D2831_50M_E25833.tif"))
+bath3 <- rast(here("data/bc_50m/NHS-D2832_50M_E25833.tif"))
+bath4 <- rast(here("data/bc_50m/NHS-D2833_50M_E25833.tif"))
+bath5 <- rast(here("data/bc_50m/NHS-D2930_50M_E25833.tif"))
+bath6 <- rast(here("data/bc_50m/NHS-D2931_50M_E25833.tif"))
+bath7 <- rast(here("data/bc_50m/NHS-D2932_50M_E25833.tif"))
+bath8 <- rast(here("data/bc_50m/NHS-D2933_50M_E25833.tif"))
+bath9 <- rast(here("data/bc_50m/NHS-D2829_50M_E25833.tif"))
+bath10 <- rast(here("data/bc_50m/NHS-D2929_50M_E25833.tif"))
+```
+
+# Preparing map background
+## Merging TIFF files
+```{r}
+#| label: merge-tiffs
+#| message: false
+#| warning: false
+#| echo: false
+
+bath_col <- sprc(bath1, bath2, bath3, bath4, bath5, bath6, bath7, bath8, bath9, bath10)
+
+bath <- merge(bath_col)
+```
+
+## Geojson AIS tracks
+```{r}
+#| label: load-geojson
+#| message: false
+#| warning: false
+#| echo: false
+
+w2s1 <- read_sf(here("data/AIS_tracks/w2s1.geojson"))
+w2s2 <- read_sf(here("data/AIS_tracks/w2s2.geojson")) 
+w2s3 <- read_sf(here("data/AIS_tracks/w2s3.geojson")) 
+w2s4 <- read_sf(here("data/AIS_tracks/w2s4.geojson")) 
+ah1 <- read_sf(here("data/AIS_tracks/ah1.geojson")) 
+yam <- read_sf(here("data/AIS_tracks/yam.geojson")) 
+
+ribs <- rbind(w2s1, w2s2, w2s3, w2s4, ah1, yam) |>
+  st_crop(bc_extent)
+```
+
+## Adding time period column
+### W2S
+```{r}
+#| label: add-tprd
+#| message: false
+#| warning: false
+#| echo: false
+
+ribs$period <- cut(ribs$starttime,
+                   breaks = c(ymd_hms("2018-09-30 23:59:59"),
+                              ymd_hms("2019-06-01 00:00:00"),
+                              ymd_hms("2019-09-30 23:59:59"),
+                              ymd_hms("2020-06-01 00:00:00"),
+                              ymd_hms("2020-09-30 23:59:59"),
+                              ymd_hms("2021-06-01 00:00:00"),
+                              ymd_hms("2021-09-30 23:59:59"),
+                              ymd_hms("2022-06-01 00:00:00"),
+                              ymd_hms("2022-09-30 23:59:59"),
+                              ymd_hms("2023-06-01 00:00:00"),
+                              ymd_hms("2023-09-30 23:59:59"),
+                              ymd_hms("2024-06-01 00:00:00"),
+                              ymd_hms("2024-09-30 23:59:59")),
+                   labels = c("Winter 2018/ 19",
+                              "Summer 2019",
+                              "Winter 2019/ 20",
+                              "Summer 2020",
+                              "Winter 2020/ 21",
+                              "Summer 2021",
+                              "Winter 2021/ 22",
+                              "Summer 2022",
+                              "Winter 2022/ 23",
+                              "Summer 2023",
+                              "Winter 2023/ 24",
+                              "Summer 2024"))
+```
+
+### Changing chart date
+```{r}
+#| label: chart-wgs84
+#| message: false
+#| warning: false
+#| echo: false
+
+bath_wgs84 <- bath |>
+   project("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+```
+
+### Defining map extent
+```{r}
+#| label: map-extent
+#| message: false
+#| warning: false
+#| echo: false
+
+bath_cropped <- crop(bath_wgs84, bc_extent)  
+```
+
+### Creating separate variables for each period
+```{r}
+#| label: prds
+#| message: false
+#| warning: false
+#| echo: false
+
+ribs_w1819 <- ribs[ribs$period == "Winter 2018/ 19", ]
+ribs_s19 <- ribs[ribs$period == "Summer 2019", ]
+ribs_w1920 <- ribs[ribs$period == "Winter 2019/ 20", ]
+ribs_s20 <- ribs[ribs$period == "Summer 2020", ]
+ribs_w2021 <- ribs[ribs$period == "Winter 2020/ 21", ]
+ribs_s21 <- ribs[ribs$period == "Summer 2021", ]
+ribs_w2122 <- ribs[ribs$period == "Winter 2021/ 22", ]
+ribs_s22 <- ribs[ribs$period == "Summer 2022", ]
+ribs_w2223 <- ribs[ribs$period == "Winter 2022/ 23", ]
+ribs_s23 <- ribs[ribs$period == "Summer 2023", ]
+ribs_w2324 <- ribs[ribs$period == "Winter 2023/ 24", ]
+ribs_s24 <- ribs[ribs$period == "Summer 2024", ]
+```
+
+# Map
+## Creating the basemap 
+```{r}
+#| label: fig-basemap
+#| fig-cap: "Basemap of Whale2Sea whale watching area."
+#| message: false
+#| warning: false
+#| echo: false
+
+map_base <- ggplot() +
+  geom_spatraster(data = bath_cropped) +
+#  geom_polygon(aes(x = c(14.5, 15.02, 14.5, 14.5),
+#                   y = c(69.68, 69.8, 69.8, 69.68)),
+#                colour = "dodgerblue4", fill = "dodgerblue4") +
+  scale_fill_gradient(low = "dodgerblue4", high = "lightskyblue") +
+  theme_bw() +
+  scale_x_continuous(expand = c(0, 0),
+                     breaks = c(15, 15.5, 16, 16.5, 17)) +
+  scale_y_continuous(expand = c(0, 0),
+                     breaks = c(69.1, 69.3, 69.5, 69.7)) +
+  theme(legend.position = "none",
+        axis.title = element_blank()) +
+  NULL
+
+map_base
+```
+
+## Creating the maps for the different periods
+```{r}
+#| label: prd-maps
+#| fig-cap: "Maps for the whale watching periods of winter 2018/ 19 and summer 2024."
+#| message: false
+#| warning: false
+#| echo: false
+
+#label_position_x <- 14.9
+#label_position_y <- 69.75
+label_position_x_s <- 15.3
+label_position_y <- 69.7
+ais_alpha <- 0.4
+
+map_s20 <- map_base +
+  geom_text(aes(label = "Summer 2020",
+                x = label_position_x_s,
+                y = label_position_y), 
+            colour = "white") +
+  geom_sf(data = ribs_s20, 
+          linewidth = 0.1, 
+          colour = "orange", 
+          alpha = ais_alpha) +
+  theme(axis.text.x = element_blank())
+
+map_s21 <- map_base +
+  geom_text(aes(label = "Summer 2021",
+                x = label_position_x_s,
+                y = label_position_y), 
+            colour = "white") +
+  geom_sf(data = ribs_s21, 
+          linewidth = 0.1, 
+          colour = "orange", 
+          alpha = ais_alpha) +
+  theme(axis.text = element_blank())
+
+map_s22 <- map_base +
+  geom_text(aes(label = "Summer 2022",
+                x = label_position_x_s,
+                y = label_position_y), 
+            colour = "white") +
+  geom_sf(data = ribs_s22, 
+          linewidth = 0.1, 
+          colour = "orange", 
+          alpha = ais_alpha) +
+  theme(axis.text.x = element_blank())
+
+map_s23 <- map_base +
+  geom_text(aes(label = "Summer 2023",
+                x = label_position_x_s,
+                y = label_position_y), 
+            colour = "white") +
+  geom_sf(data = ribs_s23, 
+          linewidth = 0.1, 
+          colour = "orange", 
+          alpha = ais_alpha) +
+  theme(axis.text.y = element_blank())
+
+map_s24 <- map_base +
+  geom_text(aes(label = "Summer 2024",
+                x = label_position_x_s,
+                y = label_position_y), 
+            colour = "white") +
+  geom_sf(data = ribs_s24, 
+          linewidth = 0.1, 
+          colour = "orange", 
+          alpha = ais_alpha) 
+```
+
+# Whale watching activity map - landscape format
+```{r}
+#| label: fig-studyarea
+#| fig-cap: "Whale2Sea whale watching activity comparison over the years from winter 2018/ 19 to summer 2024."
+#| fig-height: 10.5
+#| fig-width: 7
+#| message: false
+#| warning: false
+#| echo: false
+
+map_s20 + map_s21 + map_s22 + map_s23 + map_s24 + plot_layout(ncol = 2)
+```

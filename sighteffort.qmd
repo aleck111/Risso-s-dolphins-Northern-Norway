@@ -1,0 +1,178 @@
+---
+title: "Sightings and effort"
+author: "Alexander Eckerle"
+date: today
+format: html
+editor: source
+---
+
+# Setup
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| echo: false
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(conflicted)
+library(lubridate)
+library(gt)
+library(gtExtras)
+
+conflict_prefer_all("dplyr", quiet = TRUE)
+```
+
+# Effort data - load and edit
+```{r}
+#| label: load-edit-effort
+#| message: false
+#| warning: false
+#| echo: false
+
+num_trips <- read_delim(here("data/w2s_trips.csv"),
+                        show_col_types = FALSE) |>
+  clean_names() |>
+  rename(trip_type = x1) |>
+  # transform into comparable format
+  pivot_longer(cols = -trip_type,
+               names_to = "month_year",
+               values_to = "count") |>
+  pivot_wider(id_cols = month_year,
+              names_from = trip_type,
+              values_from = count) |>
+  clean_names() |>
+  select(month_year,
+         guided_whale_watching_rib_tour_andenes,
+         midnight_trip_birds_and_whales,
+         whale_watching_on_a_research_boat,
+         photo_trip_whale_watching,
+         combined_bird_and_whale_watching_a_sightseeing_trip_along_the_coast_to_hoyvika) |>
+  mutate(year_month = format(
+           parse_date_time(gsub(".{5}$", "", month_year),
+                           orders = c("B Y")),
+           "%Y-%m"))
+
+num_trips$ww_trips <- rowSums(num_trips[ , 2:6])
+```
+
+# Sighting data - load and edit
+```{r}
+#| label: load-edit-sight
+#| message: false
+#| warning: false
+#| echo: false
+
+sight_z <- read_delim(here("data/Rissos_dolphins.csv"), 
+                      delim = ",",
+                      show_col_types = FALSE) |>
+  clean_names() |>
+  select(date) 
+
+sight_a <- read_delim(here("data/sightings_record.csv"),
+                      show_col_types = FALSE) |>
+  clean_names() |>
+  filter(platform == "Whale2Sea"  | platform == "Norwegian Orca Survey") |>
+  select(date) 
+
+sight_a$date <- dmy(sight_a$date)
+
+sight <- rbind(sight_z, sight_a)
+```
+
+# Combine effort and sighting data
+```{r}
+#| label: effort-sight
+#| message: false
+#| warning: false
+#| echo: false
+
+# Convert dates to proper formats
+table_dates <- ymd(paste0(num_trips$year_month, "-01"))
+dates_to_check <- ymd(sight$date)
+
+# Function to count dates in each month
+count_dates_in_month <- function(month_date, dates_list) {
+  # Create interval for the month
+  start_of_month <- floor_date(month_date, "month")
+  end_of_month <- ceiling_date(start_of_month + months(1) - days(1), "day")
+  
+  # Count dates within the interval
+  sum(dates_list >= start_of_month & dates_list <= end_of_month)
+}
+
+# Apply the function to each month
+trips_sight <- data.frame(
+  year_month = num_trips$year_month,
+  year = year(table_dates),
+  month = month(table_dates),
+  ww_trips = num_trips$ww_trips,
+  sightings = sapply(table_dates, count_dates_in_month, dates_to_check)) |>
+  mutate(sight_per_trip_percent = sightings / ww_trips * 100)
+```
+
+# Effort vs. sightings per season
+```{r}
+#| label: seasons
+#| message: false
+#| warning: false
+#| echo: false
+
+sight_season <- trips_sight |>
+  filter(month >= 6 & month <= 9,
+         year <= 2024) |>
+  group_by(year) |>
+  summarise(year = year,
+            trips = sum(ww_trips),
+            sightings = sum(sightings),
+            sight_per_trip_percent = sum(sightings) / sum(ww_trips) * 100) |>
+  distinct()
+```
+
+# PhotoID effort
+```{r}
+#| label: photoID
+#| message: false
+#| warning: false
+#| echo: false
+
+photoID <- read_delim(here("data/photo_days.csv"),
+                      delim = ",",
+                      show_col_types = FALSE) |>
+  clean_names() |>
+  filter(platform == "Whale2Sea" | platform == "Norwegian Orca Survey") 
+
+photoID$year <- year(dmy(photoID$date))
+photoID$year[photoID$date == "xx.xx.22"] <- 2022
+photoID$year[photoID$date == "xx.xx.23"] <- 2023
+
+photoID_prpd <- photoID |>
+  drop_na(photos) |>
+  group_by(year) |>
+  summarise(occasions_photos_taken = n(), pictures =sum(photos), .groups = "drop") |>
+  add_row(year = 2020, occasions_photos_taken = 0, pictures = 0) |>
+  arrange(year)
+```
+
+# Make table
+```{r}
+#| label: tbl
+#| message: false
+#| warning: false
+#| echo: false
+
+seasons_table <- merge(sight_season, photoID_prpd, by = "year", all = TRUE) |>
+  gt() |>
+  gt_theme_espn() |>
+  fmt_number(columns = sight_per_trip_percent) |>
+  cols_label(year = md("**Season**"),
+             trips = md("**Trips**"),
+             sightings = md("**Sightings**"),
+             sight_per_trip_percent = md("**Sightings per trip [%]**"),
+             occasions_photos_taken = md("**Photographing occasions**"),
+             pictures = md("**Pictures**")) 
+
+
+seasons_table
+```

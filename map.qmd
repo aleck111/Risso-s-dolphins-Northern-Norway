@@ -1,0 +1,363 @@
+---
+title: "Map"
+author: "Alexander Eckerle"
+date: today
+format: html
+editor: source
+---
+
+# Setup
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| echo: false
+
+library(tidyverse)
+library(here)
+library(conflicted)
+library(janitor)
+library(raster)
+library(terra)
+library(tidyterra)
+library(rnaturalearth)
+library(ggspatial)
+library(sf)
+library(ggnewscale)
+library(formattable)
+library(rgbif)
+library(robis)
+
+conflict_prefer_all("dplyr", quiet = TRUE)
+```
+
+# Loading TIFF map data
+```{r}
+#| label: load-tiffs
+#| message: false
+#| warning: false
+#| echo: false
+
+# Tiff files from https://kartkatalog.geonorge.no/metadata/kartverket/sjo-terrengmodeller-dtm-50/67a3a191-49cc-45bc-baf0-eaaf7c513549 and https://kartkatalog.geonorge.no/metadata/e25d0104-0858-4d06-bba8-d154514c11d2
+
+bath1 <- rast(here("data/bc_50m/NHS-D2830_50M_E25833.tif"))
+bath2 <- rast(here("data/bc_50m/NHS-D2831_50M_E25833.tif"))
+bath3 <- rast(here("data/bc_50m/NHS-D2832_50M_E25833.tif"))
+bath4 <- rast(here("data/bc_50m/NHS-D2833_50M_E25833.tif"))
+bath5 <- rast(here("data/bc_50m/NHS-D2930_50M_E25833.tif"))
+bath6 <- rast(here("data/bc_50m/NHS-D2931_50M_E25833.tif"))
+bath7 <- rast(here("data/bc_50m/NHS-D2932_50M_E25833.tif"))
+bath8 <- rast(here("data/bc_50m/NHS-D2933_50M_E25833.tif"))
+topo <- rast(here("data/and_50m/7605_50m_33.tif"))
+```
+
+## Merging TIFF files
+```{r}
+#| label: merge-tiffs
+#| message: false
+#| warning: false
+#| echo: false
+
+bath_col <- sprc(bath1, bath2, bath3, bath4, bath5, bath6, bath7, bath8)
+
+bath <- merge(bath_col)
+```
+
+### Changing chart date
+```{r}
+#| label: chart-wgs84
+#| message: false
+#| warning: false
+#| echo: false
+
+bath_wgs84 <- bath |>
+   project("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+```
+
+## Define map extent
+```{r}
+#| label: map-extent
+#| message: false
+#| warning: false
+#| echo: false
+
+bc_extent <- ext(15.5, 16.5, 69.3, 69.7)
+
+bath_cropped <- crop(bath_wgs84, bc_extent)  
+```
+
+# Loading Zoe's sighting data
+```{r}
+#| label: load-sights-zoe
+#| message: false
+#| warning: false
+#| echo: false
+
+gps_zoe <- read_delim(here("data/Rissos_dolphins.csv"), 
+                      delim = ",",
+                      show_col_types = FALSE) |>
+  clean_names() 
+```
+
+## Convert latitude and longitude - function
+```{r}
+#| label: func-conv-lat
+#| message: false
+#| warning: false
+#| echo: false
+
+lat_dec <- function(dms_string) {
+  # Extract components
+  deg <- parse_number(dms_string)
+  min <- parse_number(gsub("^...", "", dms_string))
+  
+  # Convert to decimal degrees
+  dec_deg <- deg + min / 60
+  
+  # Handle potential NA values
+  result <- ifelse(is.na(dec_deg), NA, dec_deg)
+  
+  dec_deg
+}
+```
+
+## Converting latitude and longitude
+```{r}
+#| label: conv-lat-long
+#| message: false
+#| warning: false
+#| echo: false
+
+gps_zoe$lat_dec <- lat_dec(gps_zoe$latitude_original)
+gps_zoe$long_dec <- lat_dec(gps_zoe$longitude_original)  
+#drop_na(gps$lat_dec, gps$long_dec)
+
+# ATTENTION: this only works for longitudes shown with two digits for degrees 
+# Format must be: "DD°M..."
+```
+
+## Adding year column
+```{r}
+#| label: add-year
+#| message: false
+#| warning: false
+#| echo: false
+
+gps_zoe$Year <- factor(year(gps_zoe$date))
+```
+
+# Loading my sighting data
+```{r}
+#| label: load-sights-alex
+#| message: false
+#| warning: false
+#| echo: false
+
+gps_alex <- read_delim(here("data/sightings_record.csv"),
+                       show_col_types = FALSE) |>
+  clean_names() |>
+  filter(platform == "Whale2Sea" | platform == "Norwegian Orca Survey") 
+```
+
+## Making latitude and longitude readable 
+```{r}
+#| label: lat-lon-del
+#| message: false
+#| warning: false
+#| echo: false
+
+gps_alex$lat_dec <- as.numeric(
+  substr(gps_alex$lat_n, 1, nchar(gps_alex$lat_n)-2))
+gps_alex$long_dec <- as.numeric(
+  substr(gps_alex$long_n, 1, nchar(gps_alex$long_n)-2))
+gps_alex$Year <- factor(gps_alex$year)
+```
+
+# Combine Zoe's and my data
+```{r}
+#| label: cmb-sght-data
+#| message: false
+#| warning: false
+#| echo: false
+
+gps_zoe <- gps_zoe |>
+  select(lat_dec, long_dec, Year) |>
+  drop_na()
+
+gps_alex <- gps_alex |>
+  select(lat_dec, long_dec, Year) |>
+  drop_na()
+
+gps <- rbind(gps_zoe, gps_alex)
+```
+
+# Bleik Canyon 
+## Basic map
+```{r}
+#| label: fig-basemap
+#| fig-cap: "Map of the Bleik Canyon area."
+#| message: false
+#| warning: false
+#| echo: false
+
+map_base <- ggplot() +
+  geom_spatraster(data = bath_cropped) +
+  scale_fill_gradient(low = "dodgerblue4", 
+                      high = "lightskyblue", 
+                      na.value = "beige") +
+  geom_rect(aes(xmin = 15.93,
+                xmax = 15.99,
+                ymin = 69.3,
+                ymax = 69.325),
+                colour = "lightskyblue", fill = "lightskyblue") +
+  geom_spatraster_contour(data = bath_cropped,
+                          colour = "grey70") +
+  geom_text(aes(x = 16.05, y = 69.408, label = "200"), 
+            colour = "grey60",
+            size = 2.5,
+            angle = 350) + 
+  geom_text(aes(x = 15.798, y = 69.5, label = "400"),
+            colour = "grey61",
+            size = 2.5,
+            angle = 80) +
+  geom_text(aes(x = 15.793, y = 69.52, label = "600"),
+            colour = "grey62",
+            size = 2.5,
+            angle = 60) +
+  geom_text(aes(x = 15.8, y = 69.54, label = "800"),
+            colour = "grey63",
+            size = 2.5,
+            angle = 70) +
+  geom_text(aes(x = 15.802, y = 69.56, label = "1000"),
+            colour = "grey64",
+            size = 2.5,
+            angle = 70) +
+  geom_text(aes(x = 15.797, y = 69.58, label = "1200"),
+            colour = "grey65",
+            size = 2.5,
+            angle = 75) +
+  geom_text(aes(x = 15.727, y = 69.55, label = "1400"),
+            colour = "grey66",
+            size = 2.5,
+            angle = 65) +
+  geom_text(aes(x = 15.719, y = 69.57, label = "1600"),
+            colour = "grey67",
+            size = 2.5,
+            angle = 55) +
+  geom_text(aes(x = 15.678, y = 69.59, label = "1800"),
+            colour = "grey68",
+            size = 2.5,
+            angle = 75) +
+  geom_text(aes(x = 15.533, y = 69.593, label = "2000"),
+            colour = "grey69",
+            size = 2.5,
+            angle = 15) +
+  geom_text(aes(x = 16.33, y = 69.445, label = "400"),
+            colour = "grey61",
+            size = 2.5,
+            angle = 20) +
+  theme_bw() +
+  scale_x_continuous(expand = c(0, 0),
+                     breaks = c(15.6, 15.8, 16, 16.2, 16.4)) +
+  scale_y_continuous(expand = c(0, 0),
+                     breaks = c(69.4, 69.5, 69.6)) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(height = unit(0.8, "cm"),
+                         width = unit(0.8, "cm"),
+                         location = "tr") +
+  geom_text(aes(x = 15.7, y = 69.45, label = "Bleik\nCanyon")) +
+  geom_point(aes(x = 16.1194, y = 69.3144)) +
+  geom_text(aes(x = 16.1194, y = 69.328, label = "Andenes")) +
+  theme(#legend.position = "bottom",
+        #legend.direction = "horizontal",
+        axis.title = element_blank()) + #,
+#        axis.text.y = element_text(angle = 90, hjust = 0.5)) +
+  labs(fill = "Depth (m)") +
+  #guides(fill = guide_colourbar(title.position = "top")) +
+  NULL
+
+map_base
+```
+
+# North East Atlantic
+## Loading IUCN distribution
+```{r}
+#| label: load-iucn
+#| message: false
+#| warning: false
+#| echo: false
+
+iucn <- read_sf(here("data/IUCN/data_0.shp"))
+```
+
+## Landmass 
+```{r}
+#| label: land
+#| message: false
+#| warning: false
+#| echo: false
+
+europe <- ne_countries(scale = 50, continent = "Europe") 
+```
+
+## NEA map
+```{r}
+#| label: fig-nea-distr
+#| fig-cap: "Distribution range vs. study area."
+#| message: false
+#| warning: false
+#| echo: false
+
+distr_map <- ggplot() +
+  geom_sf(data = europe) +
+  geom_sf(data = iucn, fill = "dodgerblue") +
+  geom_rect(aes(xmin = bc_extent[1],
+            xmax = bc_extent[2],
+            ymin = bc_extent[3],
+            ymax = bc_extent[4]),
+            colour = "orange", fill = "orange", alpha = 0.5) + 
+  coord_sf(xlim = c(-10, 25), ylim = c(55, 71)) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(), 
+        plot.background = element_blank()) +
+  NULL
+
+distr_map
+```
+# BC + NEA combined map
+```{r}
+#| label: fig-cmb-maps
+#| fig-cap: "Inlet map."
+#| message: false
+#| warning: false
+#| echo: false
+
+map_comb <- map_base + 
+  annotation_custom(ggplotGrob(distr_map), 
+                    xmin = 16.0, xmax = 16.49, ymin = 69.425, ymax = 69.6)
+
+map_comb
+```
+
+# W2S sightings combined map 
+```{r}
+#| label: fig-sght
+#| fig-cap: "Risso's dolphins sightings at the Bleik Canyon."
+#| message: false
+#| warning: false
+#| echo: false
+
+map_sight <- map_comb +
+  geom_point(aes(x = long_dec, y = lat_dec, colour = Year), 
+             data = gps, size = 0.5) +
+  new_scale_fill() +
+  scale_colour_brewer(palette = "YlOrRd") +
+  theme(axis.title = element_blank()) +
+  NULL
+
+# legend is slightly edited using Inkscape to include a legend for inset map
+
+map_sight
+```

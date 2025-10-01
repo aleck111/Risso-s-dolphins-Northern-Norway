@@ -1,0 +1,323 @@
+---
+title: "CDC"
+author: "Alexander Eckerle"
+date: today
+format: html
+editor: source
+---
+
+# Setup
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| echo: false
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(conflicted)
+library(lubridate)
+library(patchwork)
+
+conflict_prefer_all("dplyr", quiet = TRUE)
+```
+
+# Loading and editing ID data
+```{r}
+#| label: load-id-data
+#| message: false
+#| warning: false
+#| echo: false
+
+year_id <- read_delim(here("data/photoid_log_rissos.csv"),
+                      show_col_types = FALSE) |>
+  clean_names() |>
+  filter(platform == "Whale2sea" | platform == "Norwegian Orca Survey",
+         between(angle_0_to_360, left = 135, right = 225),
+         fin_exposure_0_to_2 >= 1,
+         distinctiveness_dorsal_fin == 2 |
+           distinctiveness_scars == 2 |
+           distinctiveness_dorsal_fin == 1 & distinctiveness_scars == 1) |>
+  select(year, id) |>
+  distinct()
+```
+
+# Loading and editing encounter data
+```{r}
+#| label: load-enc-data
+#| message: false
+#| warning: false
+#| echo: false
+
+sight_zoe <- read_delim(here("data/Rissos_dolphins.csv"), 
+                        delim = ",",
+                        show_col_types = FALSE) |>
+  clean_names() |>
+  select(date) 
+
+sight_alex <- read_delim(here("data/sightings_record.csv"),
+                         show_col_types = FALSE) |>
+  clean_names() |>
+  filter(platform == "Whale2Sea"  | platform == "Norwegian Orca Survey") |>
+  select(date) 
+
+sight_alex$date <- dmy(sight_alex$date)
+
+sight <- rbind(sight_zoe, sight_alex) |>
+  distinct() |>
+  drop_na()
+```
+
+# Finding matches and preparing for plotting
+```{r}
+#| label: find-matches
+#| message: false
+#| warning: false
+#| echo: false
+
+year_id$newid <- !duplicated(year_id$id)       # finding matches by only the values which appear for the first time (not duplicated) are TRUE, otherwise FALSE
+year_id <- year_id |>                          # renaming TRUE and FALSE to "New IDs" and "Re-sightings" -> makes it easier to plot
+  mutate(newid = factor(newid, 
+                        levels=c(TRUE, FALSE), 
+                        labels=c("New IDs", "Re-sightings"))) 
+year_id$newid <- factor(year_id$newid,         # reversing the order in which the bars are plotted later, so that re-sightings are on top of new ids
+                        levels = rev(levels(year_id$newid)))
+```
+
+# Total IDs
+```{r}
+#| label: total-ids
+#| message: false
+#| warning: false
+#| echo: false
+
+id_total <- year_id |>
+  filter(newid == "New IDs") |>
+  group_by(year) |>
+  summarise(new_ids = n(), .groups = "drop")
+
+id_total$total_ids <- cumsum(id_total$new_ids)
+```
+
+## Add resightings
+```{r}
+#| label: total-new-re
+#| message: false
+#| warning: false
+#| echo: false
+
+resightings <- year_id |>
+     filter(newid == "Re-sightings") |>
+     group_by(year) |>
+     summarise(re = n(), .groups = "drop")
+
+id_total <- full_join(id_total, resightings)
+```
+
+# Number of sighting days per year
+```{r}
+#| label: sightdays-year
+#| message: false
+#| warning: false
+#| echo: false
+
+num_sight_year <- sight |>
+     group_by(year(date)) |>
+     summarise(sightdays_per_year = n(), .groups = "drop")
+```
+
+# Plotting CDC
+```{r}
+#| label: fig-CDC
+#| fig-cap: "Cumulative discovery curve of the identified Risso's dolphin individuals in Northern Norway"
+#| message: false
+#| warning: false
+#| echo: false
+
+cdc_plot <- ggplot() +
+  geom_bar(data = year_id, aes(x = year, fill = newid)) +
+  scale_fill_manual(values = c("dodgerblue1", "dodgerblue4")) +
+  geom_line(data = id_total, 
+            aes(x = year, y = total_ids, colour = "Total")) +
+  scale_colour_manual(values = "black") +
+  theme_bw() +
+  theme(legend.position = c(0.04, 0.96),
+        legend.justification = c("left", "top"),
+        legend.title = element_blank(),
+        legend.background = element_rect(fill = alpha("white", 0.7)),
+        legend.spacing.y = unit(0, "cm"),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust=1)) +
+  labs(x = "Year", 
+       y = "Identified individuals") +
+  scale_x_continuous(breaks = seq(min(year_id$year), 
+                                  max(year_id$year), by = 1),
+                     labels = seq(min(year_id$year), 
+                                  max(year_id$year), by = 1)) +
+  NULL
+
+cdc_plot
+```
+
+# Preparing encounter plot
+```{r}
+#| label: enc-prep
+#| message: false
+#| warning: false
+#| echo: false
+
+sight$year_day <- yday(sight$date)      # transform date to nth day of the year
+sight <- sight |> 
+  mutate(year_day = case_when(year(date) == "2020" | year(date) == "2024" 
+                              ~ year_day - 1,
+                              TRUE ~ year_day))    # make up for leap year 2020 and 2024 
+# this last step is to correctly position the dots relative to the other years in fig-enc
+```
+
+# Plotting Encounters
+```{r}
+#| label: fig-enc
+#| fig-cap: "Days Risso's dolphins were encountered in the area of the Bleik Canyon over the years"
+#| message: false
+#| warning: false
+#| echo: false
+
+enc_plot <- ggplot(data = sight) + 
+  geom_point(aes(x = year(date), y = yday(date)),
+             colour = 'dodgerblue3') +
+  scale_x_continuous(breaks = c(2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024)) +
+  scale_y_continuous(breaks = c(152, 182, 213, 244),
+                     labels = c("Jun", "Jul ", "Aug", "Sep"),
+                     trans = "reverse") +
+  labs(x = "Year", y = "Month") +
+  theme_bw() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.y = element_text(vjust = 5),
+        axis.text.x = element_text(angle = 45, hjust=1))
+
+enc_plot
+```
+```{r}
+#| label: Gg-sightperiod
+#| message: false
+#| warning: false
+#| echo: false
+
+period <- sight |>
+    group_by(year(date)) |>
+    summarise(period_days = max(date) - min(date) + 1, .groups = "drop")
+```
+
+# Plotting CDC and Encounters
+```{r}
+#| label: fig-cdc-enc
+#| fig-cap: "Cumulative discovery curve (a) and encounter days (b)."
+#| fig-height: 3
+#| fig-width: 6
+#| message: false
+#| warning: false
+#| echo: false
+
+cdc_plot_small <- cdc_plot +
+  labs(tag = "a") +
+  theme(plot.tag.position = "bottomleft")
+
+enc_plot_small <- enc_plot +
+  labs(tag = "b") +
+  theme(axis.text.y = element_text(vjust = 0, hjust = 1.8, angle = 90),
+        plot.tag.position = "bottomleft") 
+  
+cdc_plot_small + enc_plot_small
+```
+
+# Number of individuals per number of years
+```{r}
+#| label: indv-years
+#| message: false
+#| warning: false
+#| echo: false
+
+indv_years <- year_id |>
+  group_by(id) |>
+  summarise(years = n(), .groups = "drop")
+
+num_indv_years <- indv_years |>
+  group_by(years) |>
+  summarise(x = n(), .groups = "drop")
+```
+
+# Individuals per years
+```{r}
+#| label: fig-indv-years
+#| fig-cap: "Number of individuals seen in number of different years"
+#| message: false
+#| warning: false
+#| echo: false
+
+indv_years_plot <- ggplot(data = indv_years) +
+  geom_bar(aes(x = years), fill = "dodgerblue4") +
+  theme_bw() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  labs(x = "Number of years", y = "Individuals") +
+  NULL
+
+indv_years_plot
+```
+
+# Resighted individuals
+```{r}
+#| label: res-indv
+#| message: false
+#| warning: false
+#| echo: false
+
+enc_id <- read_delim(here("data/photoid_log_rissos.csv"),
+                      show_col_types = FALSE) |>
+  clean_names() |>
+  filter(platform == "Whale2sea" | platform == "Norwegian Orca Survey",
+           between(angle_0_to_360, left = 135, right = 225),
+           fin_exposure_0_to_2 >= 1,
+           distinctiveness_dorsal_fin == 2 |
+               distinctiveness_scars == 2 |
+               distinctiveness_dorsal_fin == 1 & distinctiveness_scars == 1) |>
+  mutate(date = dmy(date)) |>
+  select(date, encounter_number, id) |>
+  distinct()
+```
+
+# Finding individuals seen more than once
+```{r}
+#| label: indv-seen-svrltimes
+#| message: false
+#| warning: false
+#| echo: false
+
+enc_id$encntrd <- !duplicated(enc_id$id)       # finding matches by only the values which appear for the first time (not duplicated) are TRUE, otherwise FALSE
+enc <- enc_id |>                          # renaming TRUE and FALSE to "New IDs" and "Re-sightings" -> makes it easier to plot
+  mutate(encntrd = factor(encntrd, 
+                          levels=c(TRUE, FALSE), 
+                          labels=c("First time", "Seen before"))) |>
+  drop_na() |>
+  subset(duplicated(id)|duplicated(id, fromLast = TRUE)) |>
+  group_by(id, year(date)) |>
+  summarise(time_in_area = max(date) - min(date) + 1, 
+            date = date,
+            encounter_number = encounter_number,
+            .groups = "drop") |>
+  mutate(years = year(date)) |>
+  mutate(encounter = format(date, "%d/%m/%Y")) |>
+  mutate(encounter_date_number = 
+           paste(encounter, "(", encounter_number, ")")) |>
+  group_by(id) |>
+  summarise(years = str_c(years, collapse = ", "),
+            time_in_area_1year = max(time_in_area),
+            enc_date_nr = str_c(encounter_date_number, collapse = ", "),
+            .groups = "drop")
+
+# write_csv(enc, here("ids_encounters.csv"))
+```
+
