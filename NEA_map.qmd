@@ -1,0 +1,242 @@
+---
+title: "NEA_map"
+author: "Alexander Eckerle"
+date: today
+format: html
+editor: source
+---
+
+# Setup
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| echo: false
+
+library(tidyverse)
+library(here)
+library(conflicted)
+library(janitor)
+library(raster)
+library(terra)
+library(tidyterra)
+library(rnaturalearth)
+library(ggspatial)
+library(sf)
+library(ggnewscale)
+library(formattable)
+library(rgbif)
+library(robis)
+
+conflict_prefer_all("dplyr", quiet = TRUE)
+
+species = "Grampus griseus"
+```
+
+# North East Atlantic
+## Loading IUCN distribution
+```{r}
+#| label: load-iucn
+#| message: false
+#| warning: false
+#| echo: false
+
+iucn <- read_sf(here("data/IUCN/data_0.shp"))
+
+# Get the extent
+extent <- st_bbox(iucn)
+
+# Get latitude bounds from existing shape object
+latitude_range <- c(extent["ymin"], extent["ymax"])
+
+# Display results
+cat("Latitude Range:\n")
+cat(paste("Southern bound:", latitude_range[1], "\n"))
+cat(paste("Northern bound:", latitude_range[2], "\n"))
+```
+
+## Landmass 
+```{r}
+#| label: land
+#| message: false
+#| warning: false
+#| echo: false
+
+europe <- ne_countries(scale = 50, continent = "Europe") 
+```
+
+# NEA sightings
+## Loading IMR and FIWW data
+```{r}
+#| label: load-sght-srcs
+#| message: false
+#| warning: false
+#| echo: false
+
+imr <- read_delim(here("data/IMR/rissosdolphins_incidental_1984to2022.csv"),
+                  show_col_types = FALSE)
+fiww <- read_delim(here("data/FIWW/FaroeIslands.csv"),
+                   show_col_types = FALSE)
+```
+
+## Loading Artsdatabanken data
+```{r}
+#| label: dwnld-artsdb
+#| message: false
+#| warning: false
+#| echo: false
+
+adb <- read_delim(here("data/Artsdatabanken/artsdatabanken_no.csv"))
+
+# uncommenting the following lines will load data with rgbif again and overwrite existing csv-file
+# new entries might be available by the time the code is run again
+
+# adb_gg <- occ_search(scientificName = species, country = "NO") 
+# adb <- adb_gg$data 
+# 
+# write_csv(adb, here("data/Artsdatabanken/artsdatabanken_no.csv"))
+```
+
+## Loading OBIS data
+```{r}
+#| label: dwnld-obis
+#| message: false
+#| warning: false
+#| echo: false
+
+obis <- read_delim(here("data/OBIS/Occurrence.csv"))
+
+# uncommenting the following lines will load data with robis again and overwrite existing csv-file
+# new entries might be available by the time the code is run again
+
+# obis <- occurrence(scientificname = species) |>
+#   filter(decimalLatitude > 45,
+#   decimalLongitude > -35 & decimalLongitude < 35)
+# 
+# write_csv(obis, here("data/OBIS/Occurrence.csv"))
+```
+
+### Format lat + long
+```{r}
+#| label: format-latlng
+#| message: false
+#| warning: false
+#| echo: false
+
+imr$lat <- as.numeric(sub("(..)$", ".\\1", imr$Latitude_decimal))
+imr$long <- as.numeric(sub("(..)$", ".\\1", imr$Longitude_decimal))
+fiww$lat <- as.numeric(sub("^(.{2})(.*)$", "\\1.\\2", fiww$Lat_dec))
+fiww$long <- as.numeric(sub("^(.{2})(.*)$", "\\1.\\2", fiww$Long_dec))
+```
+
+## WDC catalogue areas
+```{r}
+#| label: crt-wdc-ctlg
+#| message: false
+#| warning: false
+#| echo: false
+
+wdc1 <- data.frame(long = c(0, -1.333, -2.667, -1.333), 
+                   lat = c(60.333, 61, 60.333, 59.667))
+wdc2 <- data.frame(long = c(-3, -4.333, -3, -1.667),
+                   lat = c(59.667, 59, 58.333, 59))
+```
+
+## Irish Sea catalogue area
+```{r}
+#| label: crt-is-ctlg
+#| message: false
+#| warning: false
+#| echo: false
+
+is <- data.frame(long = c(-6.441, -5.141, -3.841, -5.141),
+                 lat = c(53.469, 52.802, 53.469, 54.127))
+```
+
+## Colour for countries with ID catalogues
+```{r}
+#| label: crt-ctlgs
+#| message: false
+#| warning: false
+#| echo: false
+
+id_countries <- data.frame(long = c(-7, -6.9, -7),
+                           lat = c(53.5, 53.5, 53.4))
+```
+
+# NEA sighting map
+```{r}
+#| label: fig-nea-sght
+#| fig-cap: "Recorded Risso's dolphin sightings in the Northeast Atlantic"
+#| message: false
+#| warning: false
+#| echo: false
+
+nea_distr <- ggplot() +
+  geom_sf(data = europe, 
+          fill = ifelse(europe$geounit == "Ireland" | 
+                          europe$geounit == "France" |
+                          europe$geounit == "United Kingdom",
+                        "grey50", "grey85")) +
+  geom_sf(data = iucn, 
+          aes(fill = "IUCN")) +
+  geom_point(data = obis, 
+             aes(x = decimalLongitude, y = decimalLatitude, fill = "OBIS"), 
+             colour = "red4",
+             shape = 18) +
+  geom_point(data = imr, 
+             aes(x = long, y = lat, fill = "IMR"),
+             colour = "orange",
+             shape = 16) +
+  geom_point(data = fiww,
+             aes(x = long, y = lat, fill = "FIWW"),
+             colour = "green4",
+             shape = 17) +
+  geom_point(data = adb,
+             aes(x = decimalLongitude, y = decimalLatitude, fill = "Artsdatabanken"),
+             colour = "magenta2",
+             shape = 15) +
+  geom_point(aes(x = -(21 + 5.529 / 60), y = 65 + 9.503 / 60, fill = "MFRI"),     # (Chosson et al., 2023)
+             colour = "blue",
+             shape = 16) +
+  # geom_polygon(data = wdc1,
+  #              aes(x = long, y = lat, fill = "WDC"),
+  #              alpha = 0.5, colour = "grey") +
+  # geom_polygon(data = wdc2,
+  #              aes(x = long, y = lat, fill = "WDC"),
+  #              alpha = 0.5, colour = "grey") +
+  # geom_polygon(data = is,
+  #              aes(x = long, y = lat, fill = "Irish Sea"),
+  #              alpha = 0.5, colour = "green3") +
+  geom_polygon(data = id_countries,
+                aes(x = long, y = lat, fill = "Irish Sea"),
+                colour = "grey50") +
+  # coord_sf(xlim = c(-30, 30), ylim = c(50, 80)) +
+  coord_sf(xlim = c(-90, 30), ylim = c(0, 80)) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        legend.position = c(0.41, 0.9),
+        legend.background = element_blank()) +
+  labs(fill = " ", colour = " ") +
+  scale_fill_manual(values = c("magenta2",
+                               "green4",
+                               "orange",
+                               "grey50",
+                               "dodgerblue", 
+                               "blue",
+                               "red4",
+                               "lightgrey"), 
+                    labels = c("Artsdatabanken",
+                               "FIWW",
+                               "IMR",
+                               "Existing ID catalogues",
+                               "IUCN",
+                               "Chosson et al., 2023",
+                               "OBIS", 
+                               "WDC")) +
+  guides(fill = guide_legend(ncol = 2)) +
+  NULL
+
+nea_distr
+```
