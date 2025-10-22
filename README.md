@@ -10,17 +10,6 @@ AIS data for boat tracks of whale watching vessels was downloaded as .geojson fr
 
 The corresponding catalogue of Risso's dolphins in Northern Norway is available under: https://doi.org/10.5281/zenodo.15384625
 
-Figure 1: map.qmd
+(Figure 1: map.qmd, Figure 2: cdc.qmd)
 
-Figure 2: cdc.qmd
-
-
-Figure S1: studyarea.qmd
-
-Figure S3: NEA_map.qmd
-
-Table S1: sighteffort.qmd
-
-Table S2: cdc.qmd
-
-Table S3: age_sex.qmd
+(Figure S1: studyarea.qmd, Figure S3: NEA_map.qmd, Table S1: sighteffort.qmd, Table S2: cdc.qmd, Table S3: age_sex.qmd)
