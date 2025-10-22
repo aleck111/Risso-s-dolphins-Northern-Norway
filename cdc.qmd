@@ -317,7 +317,24 @@ enc <- enc_id |>                          # renaming TRUE and FALSE to "New IDs"
             time_in_area_1year = max(time_in_area),
             enc_date_nr = str_c(encounter_date_number, collapse = ", "),
             .groups = "drop")
+```
 
-# write_csv(enc, here("ids_encounters.csv"))
+# Table duration of stay
+```{r}
+#| label: tbl-sghts-indv
+#| message: false
+#| warning: false
+#| echo: false
+
+indiv_stay <- enc |>
+  gt() |>
+  cols_label(time_in_area_1year = "Longest stay (Days)",
+             enc_date_nr = "Date (Encounter number)") |>
+  cols_width(enc_date_nr ~ px(260)) |>
+  gt_theme_espn() 
+
+indiv_stay
+
+# gtsave(indiv_stay, filename = "indiv_stay.png")
 ```
 
