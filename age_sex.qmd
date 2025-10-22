@@ -1,0 +1,78 @@
+---
+title: "age_sex"
+author: "Alexander Eckerle"
+date: today
+format: html
+editor: source
+---
+
+# Setup
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| echo: false
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(lubridate)
+library(gt)
+library(gtExtras)
+library(conflicted)
+
+conflict_prefer_all("dplyr", quiet = TRUE)
+```
+
+# Load and edit data
+```{r}
+#| label: load-edit-data
+#| message: false
+#| warning: false
+#| echo: false
+
+id_log <- read_delim(here("data/photoid_log_rissos.csv"),
+                     show_col_types = FALSE) |>
+  clean_names() |>
+  mutate(date = dmy(date)) |>
+  filter(platform == "Whale2sea" | 
+           platform == "Norwegian Orca Survey",
+         between(angle_0_to_360, left = 135, right = 225),
+           fin_exposure_0_to_2 >= 1,
+           distinctiveness_dorsal_fin == 2 |
+               distinctiveness_scars == 2 |
+               distinctiveness_dorsal_fin == 1 & distinctiveness_scars == 1) |>
+  select(date, id, juvenile_calf, juvenile_calf_on_the_side, notes) |>
+  mutate(sex = case_when(notes == "male" ~ "Male", 
+                         TRUE ~ NA_character_)) |>
+  select(-notes) |>
+  distinct() |>
+  group_by(id) |>
+  mutate(sex = case_when(sum(juvenile_calf_on_the_side == "YES") >= 3
+                         ~ "Female",
+                         sex == "Male" ~ "Male",
+                         TRUE ~ NA_character_)) |>
+  mutate(age_class = case_when(juvenile_calf == "YES" ~ "Calf",
+                               juvenile_calf == "NO" ~ "Adult")) |>
+  select(id, age_class, sex) |>
+  distinct() |>
+  ungroup() |>
+  arrange(id) 
+```
+
+# Make table
+```{r}
+#| label: tbl-age-sex
+#| message: false
+#| warning: false
+#| echo: false
+
+age_sex_tbl <- id_log |>
+  gt() |>
+  gt_theme_espn() |>
+  cols_label(age_class = "Age class")
+
+age_sex_tbl
+
+# gtsave(age_sex_tbl, filename = "age_sex_tbl.png")
+```
